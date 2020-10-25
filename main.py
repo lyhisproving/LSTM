@@ -1,7 +1,6 @@
 import tensorflow as tf
 import numpy as np
 
-
 def one_hot(label, num_class):
     label = np.array(label)
     num_label = label.shape[0]
@@ -23,8 +22,8 @@ def seq_padding(X, padding=0):
 def load_data(train_file, test_file, train_label, test_label):
     #params: train_file,test_file
     #return X，Y的ndarray数组
-    #x_train:(20000,数组最大长度,1)
-    #x_test:(10000,数组最大长度,1)
+    #x_train:(20000,time_step,embed_size)
+    #x_test:(10000,time_step,embed_size)
     #y_train:(20000,1)
     #y_test:(10000,1)
     x_train = []
@@ -73,10 +72,6 @@ def load_data(train_file, test_file, train_label, test_label):
     x_test = x_test.reshape(x_test.shape[0], x_test.shape[1], 1)
     y_train = y_train.reshape(y_train.shape[0], 1)
     y_test = y_test.reshape(y_test.shape[0], 1)
-    print(np.shape(x_train))
-    print(np.shape(x_test))
-    print(np.shape(y_train))
-    print(np.shape(y_test))
     return x_train, x_test, y_train, y_test
 
 
@@ -87,30 +82,29 @@ x_train, x_test, y_train, y_test = load_data('data/TrainSamples.txt',
 
 batch_size = 256
 time_step = x_train.shape[1]
-input_size = 1
+embed_size = 1
 learning_rate = 0.005
-hidden_size = 128
+hidden_size = 64
 iterations = 5000
 n_classes = 2
-y_train = one_hot(y_train, n_classes)
-y_test = one_hot(y_test, n_classes)
+y_train = one_hot(y_train, n_classes)  #(200000,2)
+y_test = one_hot(y_test, n_classes)  #(40000,2)
 
-print(np.shape(y_train))
-print(type(y_train))
-
-x_place = tf.placeholder(tf.float32, [None, input_size * time_step])
-x_place = tf.reshape(x_place, [-1, time_step, input_size])
+x_place = tf.placeholder(tf.float32, [None, embed_size * time_step])
+x_place = tf.reshape(x_place, [-1, time_step, embed_size])
 y_place = tf.placeholder(tf.int32, [None, n_classes])
 rnn_cell = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-outputs, states = tf.nn.dynamic_rnn(
+#output: (batch_size,time_step,n_units) state: (2,batch_size,n_units)
+outputs_first, states_first = tf.nn.dynamic_rnn(
     cell=rnn_cell,
     inputs=x_place,
     time_major=False,
     dtype=tf.float32,
 )
-output = tf.layers.dense(inputs=outputs[:, -1, :],
+matrix = tf.nn.linear
+output = tf.layers.dense(inputs=outputs_first[:, -1, :],
                          units=n_classes,
-                         activation=tf.nn.sigmoid)
+                         activation=tf.nn.softmax)
 loss = tf.losses.softmax_cross_entropy(onehot_labels=y_place, logits=output)
 optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
 
@@ -143,6 +137,9 @@ fn_op = tf.reduce_sum(
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
+#x = x_train[0:batch_size, :, :]
+#y = y_train[0:batch_size, :]
+#sess.run({x_place: x, y_place: y})
 
 x_test = x_test[10000:20000]
 y_test = y_test[10000:20000]
@@ -155,22 +152,25 @@ for step in range(iterations):
         x_place: x,
         y_place: y
     })
-
     if step % 100 == 0:
         #print(out)
-        loss_test, accuracy_test, tp, tn, fp, fn = sess.run(
-            [loss, accuracy, tp_op, tn_op, fp_op, fn_op], {
+        loss_test, accuracy_test, tp, tn, fp, fn, output_, state_ = sess.run(
+            [
+                loss, accuracy, tp_op, tn_op, fp_op, fn_op, outputs_first,
+                states_first
+            ], {
                 x_place: x_test,
                 y_place: y_test
             })
+        print(np.shape(output_))
+        print(np.shape(state_))
         tpr = float(tp) / (float(tp) + float(fn))
         fpr = float(fp) / (float(fp) + float(tn))
         fnr = float(fn) / (float(tp) + float(fn))
         recall = tpr
-        precision = float(tp)/(float(tp) + float(fp))
+        precision = float(tp) / (float(tp) + float(fp))
         print('train loss: %f' % loss_train, '\ttest loss: %f' % loss_test,
               '\ttrain accuracy:%f' % accuracy_train,
-              '\ttest accuracy:%f' % accuracy_test,
-              '\trecall:%f' % recall, '\tprecision:%f' % precision,
-              '\tstep: %d' % step)
+              '\ttest accuracy:%f' % accuracy_test, '\trecall:%f' % recall,
+              '\tprecision:%f' % precision, '\tstep: %d' % step)
         #print('success')
