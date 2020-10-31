@@ -107,30 +107,22 @@ def load_data(train_file, test_file, train_label, test_label):
     return x_train_in, x_train_out, x_test_in,x_test_out,y_train, y_test
 
 
-x_train_in, x_train_out, x_test_in,x_test_out,y_train,y_test = load_data('data/TrainSamples_10_26.txt',
-                                             'data/TestSamples_10_26.txt',
-                                             'data/TrainLabel_10_26.txt',
-                                             'data/TestLabel_10_26.txt')
-
-
-
-
 def model_1(x_in,x_out,hidden_size):
-    with tf.name_scope('LSTM_1'):
-        cell_in = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
+    with tf.variable_scope('LSTM_1'):
+        cell_in_1 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
         outputs_in,states_in = tf.nn.dynamic_rnn(
-            cell = cell_in,
+            cell = cell_in_1,
             inputs = x_in,
             time_major = False,
-            dtype = tf.float32
+            dtype = tf.float32,
         )
-    with tf.name_scope('LSTM_2'):
-        cell_out = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
+    with tf.variable_scope('LSTM_2',reuse=tf.AUTO_REUSE):
+        cell_out_1 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
         outputs_out,states_out = tf.nn.dynamic_rnn(
-            cell=cell_out,
+            cell=cell_out_1,
             inputs = x_out,
             time_major = False,
-            dtype = tf.float32
+            dtype = tf.float32,
         )
     return outputs_in,outputs_out
 
@@ -139,10 +131,10 @@ def model_2(outputs_in,outputs_out,hidden_size):
         dense = tf.layers.Dense(hidden_size,activation='relu')
         x = dense(outputs_in)
         matrix = tf.matmul(x,tf.transpose(outputs_out,perm=[0,2,1]))
-        input_matrix = mask_place.unsqueeze(1)
-        output_matrix = mask_place.unsqueeze(-1)
-        input_weight = tf.nn.softmax(input_matrix,dim=1)
-        output_weight = tf.nn.softmax(output_matrix,dim=-1)
+        #input_matrix = mask.unsqueeze(1)
+        #output_matrix = mask.unsqueeze(-1)
+        input_weight = tf.nn.softmax(matrix,dim=1)
+        output_weight = tf.nn.softmax(matrix,dim=-1)
         #(batch_size,seq_len,hidden_size)
         coat_in = tf.matmul(input_weight,outputs_out)
         coat_out = tf.matmul(tf.transpose(output_weight,perm=[0,2,1]),outputs_in)
@@ -151,18 +143,18 @@ def model_2(outputs_in,outputs_out,hidden_size):
     return co_in_result,co_out_result
 
 def model_3(co_in_result,co_out_result,hidden_size):
-    with tf.name_scope('LSTM_3'):
-        cell_in = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
+    with tf.variable_scope('LSTM_3',reuse=tf.AUTO_REUSE):
+        cell_in_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
         output_final_in,state_final_in = tf.nn.dynamic_rnn(
-            cell = cell_in,
+            cell = cell_in_2,
             inputs = co_in_result,
             time_major = False,
             dtype = tf.float32
         )
-    with tf.name_scope('LSTM_4'):
-        cell_out = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
+    with tf.variable_scope('LSTM_4',reuse=tf.AUTO_REUSE):
+        cell_out_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
         output_final_out,state_final_out = tf.nn.dynamic_rnn(
-            cell=cell_out,
+            cell=cell_out_2,
             inputs = co_out_result,
             time_major = False,
             dtype = tf.float32
@@ -171,6 +163,10 @@ def model_3(co_in_result,co_out_result,hidden_size):
 
     
 def main():
+    x_train_in, x_train_out, x_test_in,x_test_out,y_train,y_test = load_data('data/TrainSamples_10_26.txt',
+                                             'data/TestSamples_10_26.txt',
+                                             'data/TrainLabel_10_26.txt',
+                                             'data/TestLabel_10_26.txt')
     batch_size = 64
     seq_len_in = x_train_in.shape[1]
     seq_len_out = x_train_out.shape[1]
@@ -194,13 +190,35 @@ def main():
             x_in_place = tf.reshape(x_in_place, [-1, seq_len_in, embed_size])
             x_out_place = tf.placeholder(tf.float32,[None,embed_size* seq_len_out])
             x_out_place = tf.reshape(x_out_place,[-1,seq_len_out,embed_size])
+            y_place = tf.placeholder(tf.int32, [None, n_classes])
+            #mask_place = tf.placeholder(tf.float32,[None,embed_size])
             output_in,output_out = model_1(x_in_place,x_out_place,hidden_size)
             co_in_result,co_out_result = model_2(output_in,output_out,hidden_size)
             outputs_final_in,outputs_final_out = model_3(co_in_result,co_out_result,hidden_size)
             output_final = outputs_final_in+outputs_final_out
             output = tf.layers.dense(inputs=output_final[:,-1,:],units=n_classes,activation=tf.nn.softmax)
+            with tf.name_scope('loss'):
+                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=y_place,logits=output)
+                cross_entropy = tf.reduce_mean(cross_entropy)
+            with tf.name_scope('adam_optimizer'):
+                train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+            with tf.name_scope('accuracy'):
+                correct_prediction = tf.equal(tf.arg_max(y_place,1),tf.arg_max(output,1))
+                correct_prediction = tf.cast(correct_prediction,tf.float32)
+                accuracy = tf.reduce_mean(correct_prediction)
+            init = tf.global_variables_initializer()
+        sess1.run(init)
+    index = 0
+    for step in range(iterations):
+        X_train_in = x_train_in[index:index + batch_size, :, :]
+        X_train_out = x_train_out[index:index + batch_size, :, :]
+        mask_train = y_train[index:index+batch_size,:]
+        Y_train = y_train[index:index + batch_size, :]
+        index += batch_size
+        loss_,output_,accuracy_ = sess1.run([cross_entropy,output,accuracy],feed_dict={x_in_place:X_train_in,x_out_place:X_train_out,y_place:Y_train})
+        
 
-    for step
+        print(accuracy_,loss_,output_)
     return 1
 if __name__ == '__main__':
     main()
@@ -210,12 +228,12 @@ x_out_place = tf.placeholder(tf.float32,[None,embed_size* seq_len_out])
 x_out_place = tf.reshape(x_out_place,[-1,seq_len_out,embed_size])
 mask_place = tf.placeholder(tf.float32,[None,embed_size])
 y_place = tf.placeholder(tf.int32, [None, n_classes])
-embed_cell_in = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-embed_cell_out = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
+embed_cell_in_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
+embed_cell_out_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
 #output: (batch_size,seq_len_in,n_units_in) state: (2,batch_size,n_units)
 
 outputs_in, states_in = tf.nn.dynamic_rnn(
-    cell=embed_cell_in,
+    cell=embed_cell_in_2,
     inputs=x_in_place,
     time_major=False,
     dtype=tf.float32,
@@ -224,7 +242,7 @@ outputs_in, states_in = tf.nn.dynamic_rnn(
 tf.reset_default_graph()
 with tf.Graph().as_default():
     outputs_out,states_out = tf.nn.dynamic_rnn(
-        cell=embed_cell_out,
+        cell=embed_cell_out_2,
         inputs = x_out_place,
         time_major=False,
         dtype=tf.float32,
@@ -244,16 +262,16 @@ coat_in = tf.matmul(input_weight,outputs_out)
 coat_out = tf.matmul(tf.transpose(output_weight,perm=[0,2,1]),outputs_in)
 co_in_result = tf.concat((coat_in,outputs_in),-1)
 co_out_result = tf.concat((coat_out,outputs_out),-1)
-model_cell_in = tf.contrib.rnn.BasicLSTMCell(num_units = hidden_size)
-model_cell_out = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
+model_cell_in_2 = tf.contrib.rnn.BasicLSTMCell(num_units = hidden_size)
+model_cell_out_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
 outputs_final_in,states_final_in = tf.nn.dynamic_rnn(
-    cell=model_cell_in,
+    cell=model_cell_in_2,
     inputs= co_in_result,
     time_major=False,
     dtype=tf.float32,
 )
 outputs_final_out,states_final_out = tf.nn.dynamic_rnn(
-    cell = model_cell_out,
+    cell = model_cell_out_2,
     inputs = co_out_result,
     time_major = False,
     dtype=tf.float32,
