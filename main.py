@@ -1,8 +1,6 @@
 import tensorflow as tf
 import numpy as np
 from torch import nn, Tensor
-import torch
-import torch.nn.functional as F
 
 
 def one_hot(label, num_class):
@@ -179,11 +177,11 @@ def main():
     seq_len_out = x_train_out.shape[1]
     embed_size = 1
     learning_rate = 0.0001
-    hidden_size = 128
+    hidden_size = 32
     iterations = 3000
     n_classes = 2
-    y_train = one_hot(y_train, n_classes)  #(200000,2)
-    y_test = one_hot(y_test, n_classes)  #(40000,2)
+    y_train = one_hot(y_train, n_classes)
+    y_test = one_hot(y_test, n_classes)
     # x:(num,seq_len,embed_size)
     # y:(num,1)
     # y_train (num,2)
@@ -202,31 +200,29 @@ def main():
             #mask_place = tf.placeholder(tf.float32,[None,embed_size])
             output_in, output_out = model_1(x_in_place, x_out_place,
                                             hidden_size)
-            '''co_in_result, co_out_result = model_2(output_in, output_out,
+            co_in_result, co_out_result = model_2(output_in, output_out,
                                                   hidden_size)
             outputs_final_in, outputs_final_out = model_3(
                 co_in_result, co_out_result, hidden_size)
-            output_final = outputs_final_in + outputs_final_out'''
-            output_final = output_out
+            output_final = outputs_final_in + outputs_final_out
+            #output_final = output_out
             output = tf.layers.dense(inputs=output_final[:, -1, :],
-                                     units=n_classes,
-                                     activation=tf.nn.softmax)
+                                     units=n_classes)
             with tf.name_scope('loss'):
                 cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                     labels=y_place, logits=output)
                 cross_entropy = tf.reduce_mean(cross_entropy)
             with tf.name_scope('adam_optimizer'):
-                train_step = tf.train.AdamOptimizer(
+                optimizer = tf.train.AdamOptimizer(
                     learning_rate=learning_rate).minimize(cross_entropy)
             with tf.name_scope('accuracy'):
                 correct_prediction = tf.equal(tf.argmax(y_place, axis=1),
                                               tf.argmax(output, axis=1))
-                correct_prediction = tf.cast(correct_prediction, tf.float32)
-                accuracy = tf.reduce_mean(correct_prediction)
-                '''prediction = tf.argmax(output, axis=1)
+                accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
+                prediction = tf.argmax(output, axis=1)
                 actual = tf.argmax(y_place, axis=1)
-                ones_like_actual = tf.ones_like(y_place)
-                zeros_like_actual = tf.zeros_like(y_place)
+                ones_like_actual = tf.ones_like(actual)
+                zeros_like_actual = tf.zeros_like(actual)
                 ones_like_prediction = tf.ones_like(prediction)
                 zeros_like_prediction = tf.zeros_like(prediction)
                 tp_op = tf.reduce_sum(
@@ -253,25 +249,39 @@ def main():
                             tf.equal(actual, ones_like_actual),
                             tf.equal(prediction, zeros_like_prediction)),
                         'float'))
-                #precision = '''
+                #precision =
             init = tf.global_variables_initializer()
         sess1.run(init)
     index = 0
+    X_test_in = x_test_in[0:20000, :, :]
+    X_test_out = x_test_out[0:20000:, :, :]
+    Y_test = y_test[0:20000, :]
     for step in range(iterations):
         X_train_in = x_train_in[index:index + batch_size, :, :]
         X_train_out = x_train_out[index:index + batch_size, :, :]
-        mask_train = y_train[index:index + batch_size, :]
+        #mask_train = y_train[index:index + batch_size, :]
         Y_train = y_train[index:index + batch_size, :]
         index += batch_size
-        loss_, output_, accuracy_ = sess1.run(
-            [cross_entropy, output, accuracy],
-            feed_dict={
-                x_in_place: X_train_in,
-                x_out_place: X_train_out,
-                y_place: Y_train
-            })
+        loss_, output_, op_ = sess1.run([cross_entropy, output, optimizer],
+                                        feed_dict={
+                                            x_in_place: X_train_in,
+                                            x_out_place: X_train_out,
+                                            y_place: Y_train
+                                        })
         if step % 100 == 0:
-            print(accuracy_, loss_, step)
+            accu_test, tp, fp, tn, fn = sess1.run(
+                [accuracy, tp_op, fp_op, tn_op, fn_op],
+                feed_dict={
+                    x_in_place: X_test_in,
+                    x_out_place: X_test_out,
+                    y_place: Y_test
+                })
+            tpr = float(tp) / (float(tp) + float(fn))
+            fpr = float(fp) / (float(fp) + float(tn))
+            fnr = float(fn) / (float(tp) + float(fn))
+            recall = tpr
+            precision = float(tp) / (float(tp) + float(fp))
+            print(step, accu_test, recall, precision, loss_)
     return 1
 
 
