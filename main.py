@@ -133,16 +133,20 @@ def model_1(x_in, x_out, hidden_size):
 
 
 def model_2(outputs_in, outputs_out, hidden_size):
+    #params:
+    #output:(batch_size,seq_len,hidden_lstm)
+    #return:
+    #result:(batch_size,)
     with tf.name_scope('coAttention'):
         dense = tf.layers.Dense(hidden_size, activation='relu')
         x = dense(outputs_in)
+        #matrix:(batch_size,seq_in_len,seq_out_len)
         matrix = tf.matmul(x, tf.transpose(outputs_out, perm=[0, 2, 1]))
-        #input_matrix = mask.unsqueeze(1)
-        #output_matrix = mask.unsqueeze(-1)
         input_weight = tf.nn.softmax(matrix, dim=1)
         output_weight = tf.nn.softmax(matrix, dim=-1)
-        #(batch_size,seq_len,hidden_size)
+        #(batch_size,seq_in_len,hidden_lstm)
         coat_in = tf.matmul(input_weight, outputs_out)
+        #(batch_size,seq_out_len,hidden_lstm)
         coat_out = tf.matmul(tf.transpose(output_weight, perm=[0, 2, 1]),
                              outputs_in)
         co_in_result = tf.concat((coat_in, outputs_in), -1)
@@ -152,14 +156,16 @@ def model_2(outputs_in, outputs_out, hidden_size):
 
 def model_3(co_in_result, co_out_result, hidden_size):
     with tf.variable_scope('LSTM_3', reuse=tf.AUTO_REUSE):
-        cell_in_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
+        size = co_in_result.shape[-1]
+        cell_in_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=size)
         output_final_in, state_final_in = tf.nn.dynamic_rnn(
             cell=cell_in_2,
             inputs=co_in_result,
             time_major=False,
             dtype=tf.float32)
     with tf.variable_scope('LSTM_4', reuse=tf.AUTO_REUSE):
-        cell_out_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
+        size = co_out_result.shape[-1]
+        cell_out_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=size)
         output_final_out, state_final_out = tf.nn.dynamic_rnn(
             cell=cell_out_2,
             inputs=co_out_result,
@@ -177,7 +183,7 @@ def main():
     seq_len_out = x_train_out.shape[1]
     embed_size = 1
     learning_rate = 0.0001
-    hidden_size = 32
+    hidden_size = 64
     iterations = 3000
     n_classes = 2
     y_train = one_hot(y_train, n_classes)
@@ -204,8 +210,8 @@ def main():
                                                   hidden_size)
             outputs_final_in, outputs_final_out = model_3(
                 co_in_result, co_out_result, hidden_size)
-            output_final = outputs_final_in + outputs_final_out
-            #output_final = output_out
+            #output_final = tf.concat([outputs_final_in, outputs_final_out], -1)
+            output_final = outputs_final_out
             output = tf.layers.dense(inputs=output_final[:, -1, :],
                                      units=n_classes)
             with tf.name_scope('loss'):
@@ -249,7 +255,7 @@ def main():
                             tf.equal(actual, ones_like_actual),
                             tf.equal(prediction, zeros_like_prediction)),
                         'float'))
-                #precision =
+
             init = tf.global_variables_initializer()
         sess1.run(init)
     index = 0
@@ -259,7 +265,6 @@ def main():
     for step in range(iterations):
         X_train_in = x_train_in[index:index + batch_size, :, :]
         X_train_out = x_train_out[index:index + batch_size, :, :]
-        #mask_train = y_train[index:index + batch_size, :]
         Y_train = y_train[index:index + batch_size, :]
         index += batch_size
         loss_, output_, op_ = sess1.run([cross_entropy, output, optimizer],
@@ -269,8 +274,9 @@ def main():
                                             y_place: Y_train
                                         })
         if step % 100 == 0:
-            accu_test, tp, fp, tn, fn = sess1.run(
-                [accuracy, tp_op, fp_op, tn_op, fn_op],
+            accu_test, tp, fp, tn, fn, o_in, o_out = sess1.run(
+                [accuracy, tp_op, fp_op, tn_op, fn_op, outputs_final_in,
+                    outputs_final_out],
                 feed_dict={
                     x_in_place: X_test_in,
                     x_out_place: X_test_out,
@@ -279,153 +285,12 @@ def main():
             tpr = float(tp) / (float(tp) + float(fn))
             fpr = float(fp) / (float(fp) + float(tn))
             fnr = float(fn) / (float(tp) + float(fn))
-            recall = tpr
-            precision = float(tp) / (float(tp) + float(fp))
+            recall = float(tn) / (float(fp) + float(tn))
+            precision = float(tn) / (float(tn) + float(fn))
+            #print(tp,fp,tn,fn)
             print(step, accu_test, recall, precision, loss_)
     return 1
 
 
 if __name__ == '__main__':
     main()
-'''x_in_place = tf.placeholder(tf.float32, [None, embed_size * seq_len_in])
-x_in_place = tf.reshape(x_in_place, [-1, seq_len_in, embed_size])
-x_out_place = tf.placeholder(tf.float32,[None,embed_size* seq_len_out])
-x_out_place = tf.reshape(x_out_place,[-1,seq_len_out,embed_size])
-mask_place = tf.placeholder(tf.float32,[None,embed_size])
-y_place = tf.placeholder(tf.int32, [None, n_classes])
-embed_cell_in_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-embed_cell_out_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-#output: (batch_size,seq_len_in,n_units_in) state: (2,batch_size,n_units)
-
-outputs_in, states_in = tf.nn.dynamic_rnn(
-    cell=embed_cell_in_2,
-    inputs=x_in_place,
-    time_major=False,
-    dtype=tf.float32,
-)
-#(batch_size,seq_len_out,n_units_out)
-tf.reset_default_graph()
-with tf.Graph().as_default():
-    outputs_out,states_out = tf.nn.dynamic_rnn(
-        cell=embed_cell_out_2,
-        inputs = x_out_place,
-        time_major=False,
-        dtype=tf.float32,
-    )
-dense = tf.layers.Dense(hidden_size,activation='relu')
-x = dense(outputs_in)
-#(batch,seq_len_in,seq_len_out)
-matrix = tf.matmul(x,tf.transpose(outputs_out,perm=[0,2,1]))
-#这里少了一步mask_fill
-#(batch,1,seq_len)
-input_matrix = mask_place.unsqueeze(1)
-output_matrix = mask_place.unsqueeze(-1)
-input_weight = tf.nn.softmax(input_matrix,dim=1)
-output_weight = tf.nn.softmax(output_matrix,dim=-1)
-#(batch_size,seq_len,hidden_size)
-coat_in = tf.matmul(input_weight,outputs_out)
-coat_out = tf.matmul(tf.transpose(output_weight,perm=[0,2,1]),outputs_in)
-co_in_result = tf.concat((coat_in,outputs_in),-1)
-co_out_result = tf.concat((coat_out,outputs_out),-1)
-model_cell_in_2 = tf.contrib.rnn.BasicLSTMCell(num_units = hidden_size)
-model_cell_out_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-outputs_final_in,states_final_in = tf.nn.dynamic_rnn(
-    cell=model_cell_in_2,
-    inputs= co_in_result,
-    time_major=False,
-    dtype=tf.float32,
-)
-outputs_final_out,states_final_out = tf.nn.dynamic_rnn(
-    cell = model_cell_out_2,
-    inputs = co_out_result,
-    time_major = False,
-    dtype=tf.float32,
-)
-outputs_final = outputs_final_in+outputs_final_out
-states_final = states_final_in+states_final_out
-
-output = tf.layers.dense(inputs=outputs_final[:, -1, :],
-                         units=n_classes,
-                         activation=tf.nn.softmax)
-loss = tf.losses.softmax_cross_entropy(onehot_labels=y_place, logits=output)
-optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-
-prediction = tf.equal(tf.argmax(y_place, axis=1), tf.argmax(output, axis=1))
-accuracy = tf.reduce_mean(tf.cast(prediction, 'float'))
-prediction = tf.argmax(output, axis=1)
-actual = tf.argmax(y_place, axis=1)
-ones_like_actual = tf.ones_like(actual)
-zeros_like_actual = tf.zeros_like(actual)
-ones_like_prediction = tf.ones_like(prediction)
-zeros_like_prediction = tf.zeros_like(prediction)
-tp_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(tf.equal(actual, ones_like_actual),
-                       tf.equal(prediction, ones_like_prediction)), 'float'))
-tn_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(
-            tf.equal(actual, zeros_like_actual),
-            tf.equal(prediction, zeros_like_prediction),
-        ), 'float'))
-fp_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(tf.equal(actual, zeros_like_actual),
-                       tf.equal(prediction, ones_like_prediction)), 'float'))
-fn_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(tf.equal(actual, ones_like_actual),
-                       tf.equal(prediction, zeros_like_prediction)), 'float'))
-
-sess = tf.Session()
-sess.run(tf.global_variables_initializer())
-#x = x_train[0:batch_size, :, :]
-#y = y_train[0:batch_size, :]
-#sess.run({x_place: x, y_place: y})
-
-
-for step in range(iterations):
-    index = 0
-    X_train_in = x_train_in[index:index + batch_size, :, :]
-    
-    X_train_out = x_train_out[index:index + batch_size, :, :]
-
-    mask_train = y_train[index:index+batch_size,:]
-    Y_train = y_train[index:index + batch_size, :]
-    index += batch_size
-    _, loss_train, accuracy_train = sess.run([optimizer, loss, accuracy], {
-        x_in_place: X_train_in,
-        x_out_place:X_train_out,
-        mask_place:mask_train,
-        y_place:Y_train
-    })
-    if step % 100 == 0:
-        #print(out)
-        batch = 1000
-        X_test_in = x_test_in[index:index+batch,:,:]
-        X_test_out = x_test_out[index:index+batch,:,:]
-        mask_test = y_test[index:index+batch,:,:]
-        Y_test = y_test[index:index+batch,:,:]
-        loss_test, accuracy_test, tp, tn, fp, fn, output_, state_ = sess.run(
-            [
-                loss, accuracy, tp_op, tn_op, fp_op, fn_op, outputs_final,
-                states_final
-            ], {
-                x_in_place:X_test_in,
-                x_out_place:X_test_out,
-                mask_place:mask_test,
-                y_place:Y_test
-            })
-        print(type(output_))
-        print(np.shape(state_))
-        tpr = float(tp) / (float(tp) + float(fn))
-        fpr = float(fp) / (float(fp) + float(tn))
-        fnr = float(fn) / (float(tp) + float(fn))
-        recall = tpr
-        precision = float(tp) / (float(tp) + float(fp))
-        print('train loss: %f' % loss_train, '\ttest loss: %f' % loss_test,
-              '\ttrain accuracy:%f' % accuracy_train,
-              '\ttest accuracy:%f' % accuracy_test, '\trecall:%f' % recall,
-              '\tprecision:%f' % precision, '\tstep: %d' % step)
-        #print('success')
-'''
