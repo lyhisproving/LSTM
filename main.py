@@ -1,8 +1,7 @@
 import tensorflow as tf
 import numpy as np
-from torch import nn,Tensor
-import torch
-import torch.nn.functional as F
+
+
 def one_hot(label, num_class):
     label = np.array(label)
     num_label = label.shape[0]
@@ -11,13 +10,31 @@ def one_hot(label, num_class):
     out.flat[index + label.ravel()] = 1
     return out
 
-def seq_padding(X, padding=0):
-    L = [len(x) for x in X]
-    ML = max(L)
+
+def seq_padding(X, max_len, padding=0):
     return np.array([
-        np.concatenate([x, [padding] * (ML - len(x))]) if len(x) < ML else x
+        np.concatenate([x, [padding] *
+                        (max_len - len(x))]) if len(x) < max_len else x
         for x in X
     ])
+
+
+def normalization(data, max_num, min_num):
+    out = []
+    for line in data:
+        #for x in line:
+        #    x = 0 if x==0 else x
+        temp = [(x - min_num) / (max_num - min_num) for x in line if x != 0]
+        out.append(temp)
+    #x = y *100
+    return out
+
+
+def normalization2(data, max_num):
+    out = data + 20000
+    data = out / 40000
+    return data
+
 
 def load_data(train_file, test_file, train_label, test_label):
     #params: train_file,test_file
@@ -32,23 +49,21 @@ def load_data(train_file, test_file, train_label, test_label):
     x_test_out = []
     y_train = []
     y_test = []
-    max_int_seq_size=0
-    max_out_seq_size=0
+    max_num = -1e5
+    min_num = 1e5
     with open(train_file, 'r') as f:
         line = f.readline()
         while line:
             lt = line.split('#')
             lt_1 = lt[0].split()
             lt_2 = lt[1].split()
-            max_int_seq_size=max(max_int_seq_size,len(lt_1))
-            max_out_seq_size=max(max_out_seq_size,len(lt_2))
             data_in = [int(x) for x in lt_1]
-            data_out=[int(x) for x in lt_2]
+            data_out = [int(x) for x in lt_2]
+            max_num = max(max_num, max(max(data_in), max(data_out)))
+            min_num = min(min_num, min(min(data_in), min(data_out)))
+
             x_train_in.append(data_in)
             x_train_out.append(data_out)
-            #lst = lt_1+lt_2
-            #data = [int(x) for x in lst]
-            #x_train.append(data)
             line = f.readline()
 
     with open(test_file, 'r') as f:
@@ -57,16 +72,12 @@ def load_data(train_file, test_file, train_label, test_label):
             lt = line.split('#')
             lt_1 = lt[0].split()
             lt_2 = lt[1].split()
-            max_int_seq_size=max(max_int_seq_size,len(lt_1))
-            max_out_seq_size=max(max_out_seq_size,len(lt_2))
             data_in = [int(x) for x in lt_1]
             data_out = [int(x) for x in lt_2]
+            max_num = max(max_num, max(max(data_in), max(data_out)))
+            min_num = min(min_num, min(min(data_in), min(data_out)))
             x_test_in.append(data_in)
             x_test_out.append(data_out)
-
-            #lst = lt_1+lt_2
-            #data = [int(x) for x in lst]
-            #x_test.append(data)
             line = f.readline()
     with open(train_label, 'r') as f:
         line = f.readline()
@@ -82,103 +93,126 @@ def load_data(train_file, test_file, train_label, test_label):
             data = [int(x) for x in lst]
             y_test.append(data)
             line = f.readline()
-    
-    X_in = x_train_in+x_test_in
-    X_out=x_train_out+x_test_out
-    X_in=seq_padding(X_in)
-    X_out = seq_padding(X_out)
-    X_in=np.array(X_in)
-    X_out=np.array(X_out)
-    x_train_in=X_in[0:len(x_train_in)]
-    x_test_in=X_in[len(x_train_in):]
-    x_train_out=X_out[0:len(x_train_out)]
-    x_test_out=X_out[len(x_train_out):]
+    x_train_in = normalization(x_train_in, max_num, min_num)
+    x_train_out = normalization(x_train_out, max_num, min_num)
+    x_test_in = normalization(x_test_in, max_num, min_num)
+    x_test_out = normalization(x_test_out, max_num, min_num)
 
+    X_in = x_train_in + x_test_in
+    X_out = x_train_out + x_test_out
+    L1 = (len(x) for x in X_in)
+    max_len = max(L1)
+    L2 = (len(x) for x in X_out)
+    max_len = max(max_len, max(L2))
+    X_in = seq_padding(X_in, max_len)
+    X_out = seq_padding(X_out, max_len)
+    X_in = np.array(X_in)
+    X_out = np.array(X_out)
+    x_train_in = X_in[0:len(x_train_in)]
+    x_test_in = X_in[len(x_train_in):]
+    x_train_out = X_out[0:len(x_train_out)]
+    x_test_out = X_out[len(x_train_out):]
     y_train = np.array(y_train)
     y_test = np.array(y_test)
-    x_train_in = x_train_in.reshape(x_train_in.shape[0], x_train_in.shape[1], 1)
+    '''
+    max_num = max(abs(max_num),abs(min_num))
+    x_train_in = normalization2(x_train_in,max_num)
+    x_train_out = normalization2(x_train_out,max_num)
+    x_test_in = normalization2(x_test_in,max_num)
+    x_test_out = normalization2(x_test_out,max_num)'''
+
+    x_train_in = x_train_in.reshape(x_train_in.shape[0], x_train_in.shape[1],
+                                    1)
     x_test_in = x_test_in.reshape(x_test_in.shape[0], x_test_in.shape[1], 1)
-    x_train_out = x_train_out.reshape(x_train_out.shape[0],x_train_out.shape[1],1)
-    x_test_out = x_test_out.reshape(x_test_out.shape[0],x_test_out.shape[1],1)
+    x_train_out = x_train_out.reshape(x_train_out.shape[0],
+                                      x_train_out.shape[1], 1)
+    x_test_out = x_test_out.reshape(x_test_out.shape[0], x_test_out.shape[1],
+                                    1)
 
     y_train = y_train.reshape(y_train.shape[0], 1)
     y_test = y_test.reshape(y_test.shape[0], 1)
     #print(np.shape(x_train),np.shape(x_test))
-    return x_train_in, x_train_out, x_test_in,x_test_out,y_train, y_test
+    return x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test
 
 
-def model_1(x_in,x_out,hidden_size):
+def model_1(x_in, x_out, hidden_size):
     with tf.variable_scope('LSTM_1'):
         cell_in_1 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-        outputs_in,states_in = tf.nn.dynamic_rnn(
-            cell = cell_in_1,
-            inputs = x_in,
-            time_major = False,
-            dtype = tf.float32,
+        outputs_in, states_in = tf.nn.dynamic_rnn(
+            cell=cell_in_1,
+            inputs=x_in,
+            time_major=False,
+            dtype=tf.float32,
         )
-    with tf.variable_scope('LSTM_2',reuse=tf.AUTO_REUSE):
+    with tf.variable_scope('LSTM_2', reuse=tf.AUTO_REUSE):
         cell_out_1 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
-        outputs_out,states_out = tf.nn.dynamic_rnn(
+        outputs_out, states_out = tf.nn.dynamic_rnn(
             cell=cell_out_1,
-            inputs = x_out,
-            time_major = False,
-            dtype = tf.float32,
+            inputs=x_out,
+            time_major=False,
+            dtype=tf.float32,
         )
-    return outputs_in,outputs_out
+    return outputs_in, outputs_out
 
-def model_2(outputs_in,outputs_out,hidden_size):
+
+def model_2(outputs_in, outputs_out, hidden_size):
+    #params:
+    #output:(batch_size,seq_len,hidden_lstm)
+    #return:
+    #result:(batch_size,)
     with tf.name_scope('coAttention'):
-        dense = tf.layers.Dense(hidden_size,activation='relu')
+        dense = tf.layers.Dense(hidden_size, activation='relu')
         x = dense(outputs_in)
-        matrix = tf.matmul(x,tf.transpose(outputs_out,perm=[0,2,1]))
-        #input_matrix = mask.unsqueeze(1)
-        #output_matrix = mask.unsqueeze(-1)
-        input_weight = tf.nn.softmax(matrix,dim=1)
-        output_weight = tf.nn.softmax(matrix,dim=-1)
-        #(batch_size,seq_len,hidden_size)
-        coat_in = tf.matmul(input_weight,outputs_out)
-        coat_out = tf.matmul(tf.transpose(output_weight,perm=[0,2,1]),outputs_in)
-        co_in_result = tf.concat((coat_in,outputs_in),-1)
-        co_out_result = tf.concat((coat_out,outputs_out),-1)
-    return co_in_result,co_out_result
+        #matrix:(batch_size,seq_in_len,seq_out_len)
+        matrix = tf.matmul(x, tf.transpose(outputs_out, perm=[0, 2, 1]))
+        input_weight = tf.nn.softmax(matrix, dim=1)
+        output_weight = tf.nn.softmax(matrix, dim=-1)
+        #(batch_size,seq_in_len,hidden_lstm)
+        coat_in = tf.matmul(input_weight, outputs_out)
+        #(batch_size,seq_out_len,hidden_lstm)
+        coat_out = tf.matmul(tf.transpose(output_weight, perm=[0, 2, 1]),
+                             outputs_in)
+        co_in_result = tf.concat((coat_in, outputs_in), -1)
+        co_out_result = tf.concat((coat_out, outputs_out), -1)
+    return co_in_result, co_out_result
 
-def model_3(co_in_result,co_out_result,hidden_size):
-    with tf.variable_scope('LSTM_3',reuse=tf.AUTO_REUSE):
-        cell_in_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
-        output_final_in,state_final_in = tf.nn.dynamic_rnn(
-            cell = cell_in_2,
-            inputs = co_in_result,
-            time_major = False,
-            dtype = tf.float32
-        )
-    with tf.variable_scope('LSTM_4',reuse=tf.AUTO_REUSE):
-        cell_out_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=hidden_size)
-        output_final_out,state_final_out = tf.nn.dynamic_rnn(
+
+def model_3(co_in_result, co_out_result, hidden_size):
+    with tf.variable_scope('LSTM_3', reuse=tf.AUTO_REUSE):
+        size = co_in_result.shape[-1]
+        cell_in_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=size)
+        output_final_in, state_final_in = tf.nn.dynamic_rnn(
+            cell=cell_in_2,
+            inputs=co_in_result,
+            time_major=False,
+            dtype=tf.float32)
+    with tf.variable_scope('LSTM_4', reuse=tf.AUTO_REUSE):
+        size = co_out_result.shape[-1]
+        cell_out_2 = tf.nn.rnn_cell.BasicLSTMCell(num_units=size)
+        output_final_out, state_final_out = tf.nn.dynamic_rnn(
             cell=cell_out_2,
-            inputs = co_out_result,
-            time_major = False,
-            dtype = tf.float32
-        )
-    return output_final_in,output_final_out
+            inputs=co_out_result,
+            time_major=False,
+            dtype=tf.float32)
+    return output_final_in, output_final_out
 
-    
+
 def main():
-    x_train_in, x_train_out, x_test_in,x_test_out,y_train,y_test = load_data('data/TrainSamples_10_26.txt',
-                                             'data/TestSamples_10_26.txt',
-                                             'data/TrainLabel_10_26.txt',
-                                             'data/TestLabel_10_26.txt')
+    x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test = load_data(
+        'data/TrainSamples_10_26.txt', 'data/TestSamples_10_26.txt',
+        'data/TrainLabel_10_26.txt', 'data/TestLabel_10_26.txt')
+
     batch_size = 64
     seq_len_in = x_train_in.shape[1]
     seq_len_out = x_train_out.shape[1]
-    print(type(seq_len_in),seq_len_in)
-    print(type(seq_len_out),seq_len_out)
     embed_size = 1
-    learning_rate = 0.005
+    learning_rate = 0.001
     hidden_size = 64
-    iterations = 5000
+    epoches = 10
+    iterations = 3000
     n_classes = 2
-    y_train = one_hot(y_train, n_classes)  #(200000,2)
-    y_test = one_hot(y_test, n_classes)  #(40000,2)
+    y_train = one_hot(y_train, n_classes)
+    y_test = one_hot(y_test, n_classes)
     # x:(num,seq_len,embed_size)
     # y:(num,1)
     # y_train (num,2)
@@ -186,182 +220,104 @@ def main():
     sess1 = tf.Session(graph=g1)
     with sess1.as_default():
         with g1.as_default():
-            x_in_place = tf.placeholder(tf.float32, [None, embed_size * seq_len_in])
+            x_in_place = tf.placeholder(tf.float32,
+                                        [None, embed_size * seq_len_in])
             x_in_place = tf.reshape(x_in_place, [-1, seq_len_in, embed_size])
-            x_out_place = tf.placeholder(tf.float32,[None,embed_size* seq_len_out])
-            x_out_place = tf.reshape(x_out_place,[-1,seq_len_out,embed_size])
+            x_out_place = tf.placeholder(tf.float32,
+                                         [None, embed_size * seq_len_out])
+            x_out_place = tf.reshape(x_out_place,
+                                     [-1, seq_len_out, embed_size])
             y_place = tf.placeholder(tf.int32, [None, n_classes])
             #mask_place = tf.placeholder(tf.float32,[None,embed_size])
-            output_in,output_out = model_1(x_in_place,x_out_place,hidden_size)
-            co_in_result,co_out_result = model_2(output_in,output_out,hidden_size)
-            outputs_final_in,outputs_final_out = model_3(co_in_result,co_out_result,hidden_size)
-            output_final = outputs_final_in+outputs_final_out
-            output = tf.layers.dense(inputs=output_final[:,-1,:],units=n_classes,activation=tf.nn.softmax)
+            output_in, output_out = model_1(x_in_place, x_out_place,
+                                            hidden_size)
+            co_in_result, co_out_result = model_2(output_in, output_out,
+                                                  hidden_size)
+            outputs_final_in, outputs_final_out = model_3(
+                co_in_result, co_out_result, hidden_size)
+            #output_final = tf.concat([outputs_final_in, outputs_final_out], -1)
+            output_final = outputs_final_out
+            output = tf.layers.dense(inputs=output_final[:, -1, :],
+                                     units=n_classes)
             with tf.name_scope('loss'):
-                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=y_place,logits=output)
+                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+                    labels=y_place, logits=output)
                 cross_entropy = tf.reduce_mean(cross_entropy)
             with tf.name_scope('adam_optimizer'):
-                train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+                optimizer = tf.train.AdamOptimizer(
+                    learning_rate=learning_rate).minimize(cross_entropy)
             with tf.name_scope('accuracy'):
-                correct_prediction = tf.equal(tf.arg_max(y_place,1),tf.arg_max(output,1))
-                correct_prediction = tf.cast(correct_prediction,tf.float32)
-                accuracy = tf.reduce_mean(correct_prediction)
+                correct_prediction = tf.equal(tf.argmax(y_place, axis=1),
+                                              tf.argmax(output, axis=1))
+                accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
+                prediction = tf.argmax(output, axis=1)
+                actual = tf.argmax(y_place, axis=1)
+                ones_like_actual = tf.ones_like(actual)
+                zeros_like_actual = tf.zeros_like(actual)
+                ones_like_prediction = tf.ones_like(prediction)
+                zeros_like_prediction = tf.zeros_like(prediction)
+                tp_op = tf.reduce_sum(
+                    tf.cast(
+                        tf.logical_and(
+                            tf.equal(actual, ones_like_actual),
+                            tf.equal(prediction, ones_like_prediction)),
+                        'float'))
+                tn_op = tf.reduce_sum(
+                    tf.cast(
+                        tf.logical_and(
+                            tf.equal(actual, zeros_like_actual),
+                            tf.equal(prediction, zeros_like_prediction),
+                        ), 'float'))
+                fp_op = tf.reduce_sum(
+                    tf.cast(
+                        tf.logical_and(
+                            tf.equal(actual, zeros_like_actual),
+                            tf.equal(prediction, ones_like_prediction)),
+                        'float'))
+                fn_op = tf.reduce_sum(
+                    tf.cast(
+                        tf.logical_and(
+                            tf.equal(actual, ones_like_actual),
+                            tf.equal(prediction, zeros_like_prediction)),
+                        'float'))
+
             init = tf.global_variables_initializer()
         sess1.run(init)
     index = 0
-    for step in range(iterations):
-        X_train_in = x_train_in[index:index + batch_size, :, :]
-        X_train_out = x_train_out[index:index + batch_size, :, :]
-        mask_train = y_train[index:index+batch_size,:]
-        Y_train = y_train[index:index + batch_size, :]
-        index += batch_size
-        loss_,output_,accuracy_ = sess1.run([cross_entropy,output,accuracy],feed_dict={x_in_place:X_train_in,x_out_place:X_train_out,y_place:Y_train})
-        
+    X_test_in = x_test_in[0:20000, :, :]
+    X_test_out = x_test_out[0:20000:, :, :]
+    Y_test = y_test[0:20000, :]
+    for epoch in range(epoches):
+        index = 0
+        for step in range(iterations):
+            X_train_in = x_train_in[index:index + batch_size, :, :]
+            X_train_out = x_train_out[index:index + batch_size, :, :]
+            Y_train = y_train[index:index + batch_size, :]
+            index += batch_size
+            loss_, output_, op_ = sess1.run([cross_entropy, output, optimizer],
+                                            feed_dict={
+                                                x_in_place: X_train_in,
+                                                x_out_place: X_train_out,
+                                                y_place: Y_train
+                                            })
+            if step % 100 == 0:
+                accu_test, tp, fp, tn, fn, loss_test = sess1.run(
+                    [accuracy, tp_op, fp_op, tn_op, fn_op, cross_entropy],
+                    feed_dict={
+                        x_in_place: X_test_in,
+                        x_out_place: X_test_out,
+                        y_place: Y_test
+                    })
+                tpr = float(tp) / (float(tp) + float(fn))
+                fpr = float(fp) / (float(fp) + float(tn))
+                fnr = float(fn) / (float(tp) + float(fn))
+                recall = float(tn) / (float(fp) + float(tn))
+                precision = float(tn) / (float(tn) + float(fn))
+                #print(tp,fp,tn,fn)
+                print(epoch, step, accu_test, recall, precision, loss_,
+                      loss_test)
+    return 0
 
-        print(accuracy_,loss_,output_)
-    return 1
+
 if __name__ == '__main__':
     main()
-'''x_in_place = tf.placeholder(tf.float32, [None, embed_size * seq_len_in])
-x_in_place = tf.reshape(x_in_place, [-1, seq_len_in, embed_size])
-x_out_place = tf.placeholder(tf.float32,[None,embed_size* seq_len_out])
-x_out_place = tf.reshape(x_out_place,[-1,seq_len_out,embed_size])
-mask_place = tf.placeholder(tf.float32,[None,embed_size])
-y_place = tf.placeholder(tf.int32, [None, n_classes])
-embed_cell_in_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-embed_cell_out_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-#output: (batch_size,seq_len_in,n_units_in) state: (2,batch_size,n_units)
-
-outputs_in, states_in = tf.nn.dynamic_rnn(
-    cell=embed_cell_in_2,
-    inputs=x_in_place,
-    time_major=False,
-    dtype=tf.float32,
-)
-#(batch_size,seq_len_out,n_units_out)
-tf.reset_default_graph()
-with tf.Graph().as_default():
-    outputs_out,states_out = tf.nn.dynamic_rnn(
-        cell=embed_cell_out_2,
-        inputs = x_out_place,
-        time_major=False,
-        dtype=tf.float32,
-    )
-dense = tf.layers.Dense(hidden_size,activation='relu')
-x = dense(outputs_in)
-#(batch,seq_len_in,seq_len_out)
-matrix = tf.matmul(x,tf.transpose(outputs_out,perm=[0,2,1]))
-#这里少了一步mask_fill
-#(batch,1,seq_len)
-input_matrix = mask_place.unsqueeze(1)
-output_matrix = mask_place.unsqueeze(-1)
-input_weight = tf.nn.softmax(input_matrix,dim=1)
-output_weight = tf.nn.softmax(output_matrix,dim=-1)
-#(batch_size,seq_len,hidden_size)
-coat_in = tf.matmul(input_weight,outputs_out)
-coat_out = tf.matmul(tf.transpose(output_weight,perm=[0,2,1]),outputs_in)
-co_in_result = tf.concat((coat_in,outputs_in),-1)
-co_out_result = tf.concat((coat_out,outputs_out),-1)
-model_cell_in_2 = tf.contrib.rnn.BasicLSTMCell(num_units = hidden_size)
-model_cell_out_2 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
-outputs_final_in,states_final_in = tf.nn.dynamic_rnn(
-    cell=model_cell_in_2,
-    inputs= co_in_result,
-    time_major=False,
-    dtype=tf.float32,
-)
-outputs_final_out,states_final_out = tf.nn.dynamic_rnn(
-    cell = model_cell_out_2,
-    inputs = co_out_result,
-    time_major = False,
-    dtype=tf.float32,
-)
-outputs_final = outputs_final_in+outputs_final_out
-states_final = states_final_in+states_final_out
-
-output = tf.layers.dense(inputs=outputs_final[:, -1, :],
-                         units=n_classes,
-                         activation=tf.nn.softmax)
-loss = tf.losses.softmax_cross_entropy(onehot_labels=y_place, logits=output)
-optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
-
-prediction = tf.equal(tf.argmax(y_place, axis=1), tf.argmax(output, axis=1))
-accuracy = tf.reduce_mean(tf.cast(prediction, 'float'))
-prediction = tf.argmax(output, axis=1)
-actual = tf.argmax(y_place, axis=1)
-ones_like_actual = tf.ones_like(actual)
-zeros_like_actual = tf.zeros_like(actual)
-ones_like_prediction = tf.ones_like(prediction)
-zeros_like_prediction = tf.zeros_like(prediction)
-tp_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(tf.equal(actual, ones_like_actual),
-                       tf.equal(prediction, ones_like_prediction)), 'float'))
-tn_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(
-            tf.equal(actual, zeros_like_actual),
-            tf.equal(prediction, zeros_like_prediction),
-        ), 'float'))
-fp_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(tf.equal(actual, zeros_like_actual),
-                       tf.equal(prediction, ones_like_prediction)), 'float'))
-fn_op = tf.reduce_sum(
-    tf.cast(
-        tf.logical_and(tf.equal(actual, ones_like_actual),
-                       tf.equal(prediction, zeros_like_prediction)), 'float'))
-
-sess = tf.Session()
-sess.run(tf.global_variables_initializer())
-#x = x_train[0:batch_size, :, :]
-#y = y_train[0:batch_size, :]
-#sess.run({x_place: x, y_place: y})
-
-
-for step in range(iterations):
-    index = 0
-    X_train_in = x_train_in[index:index + batch_size, :, :]
-    
-    X_train_out = x_train_out[index:index + batch_size, :, :]
-
-    mask_train = y_train[index:index+batch_size,:]
-    Y_train = y_train[index:index + batch_size, :]
-    index += batch_size
-    _, loss_train, accuracy_train = sess.run([optimizer, loss, accuracy], {
-        x_in_place: X_train_in,
-        x_out_place:X_train_out,
-        mask_place:mask_train,
-        y_place:Y_train
-    })
-    if step % 100 == 0:
-        #print(out)
-        batch = 1000
-        X_test_in = x_test_in[index:index+batch,:,:]
-        X_test_out = x_test_out[index:index+batch,:,:]
-        mask_test = y_test[index:index+batch,:,:]
-        Y_test = y_test[index:index+batch,:,:]
-        loss_test, accuracy_test, tp, tn, fp, fn, output_, state_ = sess.run(
-            [
-                loss, accuracy, tp_op, tn_op, fp_op, fn_op, outputs_final,
-                states_final
-            ], {
-                x_in_place:X_test_in,
-                x_out_place:X_test_out,
-                mask_place:mask_test,
-                y_place:Y_test
-            })
-        print(type(output_))
-        print(np.shape(state_))
-        tpr = float(tp) / (float(tp) + float(fn))
-        fpr = float(fp) / (float(fp) + float(tn))
-        fnr = float(fn) / (float(tp) + float(fn))
-        recall = tpr
-        precision = float(tp) / (float(tp) + float(fp))
-        print('train loss: %f' % loss_train, '\ttest loss: %f' % loss_test,
-              '\ttrain accuracy:%f' % accuracy_train,
-              '\ttest accuracy:%f' % accuracy_test, '\trecall:%f' % recall,
-              '\tprecision:%f' % precision, '\tstep: %d' % step)
-        #print('success')
-'''
-
