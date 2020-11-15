@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from torch import nn, Tensor
+import loadData
 
 
 def one_hot(label, num_class):
@@ -12,112 +12,13 @@ def one_hot(label, num_class):
     return out
 
 
-def seq_padding(X, padding=0):
-    L = [len(x) for x in X]
-    ML = max(L)
-    return np.array([
-        np.concatenate([x, [padding] * (ML - len(x))]) if len(x) < ML else x
-        for x in X
-    ])
-
-
-def load_data(train_file, test_file, train_label, test_label):
-    #params: train_file,test_file
-    #return X，Y的ndarray数组
-    #x_train:(20000,seq_len_in,embed_size)
-    #x_test:(10000,seq_len_in,embed_size)
-    #y_train:(20000,1)
-    #y_test:(10000,1)
-    x_train_in = []
-    x_train_out = []
-    x_test_in = []
-    x_test_out = []
-    y_train = []
-    y_test = []
-    max_int_seq_size = 0
-    max_out_seq_size = 0
-    with open(train_file, 'r') as f:
-        line = f.readline()
-        while line:
-            lt = line.split('#')
-            lt_1 = lt[0].split()
-            lt_2 = lt[1].split()
-            max_int_seq_size = max(max_int_seq_size, len(lt_1))
-            max_out_seq_size = max(max_out_seq_size, len(lt_2))
-            data_in = [int(x) for x in lt_1]
-            data_out = [int(x) for x in lt_2]
-            x_train_in.append(data_in)
-            x_train_out.append(data_out)
-            #lst = lt_1+lt_2
-            #data = [int(x) for x in lst]
-            #x_train.append(data)
-            line = f.readline()
-
-    with open(test_file, 'r') as f:
-        line = f.readline()
-        while line:
-            lt = line.split('#')
-            lt_1 = lt[0].split()
-            lt_2 = lt[1].split()
-            max_int_seq_size = max(max_int_seq_size, len(lt_1))
-            max_out_seq_size = max(max_out_seq_size, len(lt_2))
-            data_in = [int(x) for x in lt_1]
-            data_out = [int(x) for x in lt_2]
-            x_test_in.append(data_in)
-            x_test_out.append(data_out)
-
-            #lst = lt_1+lt_2
-            #data = [int(x) for x in lst]
-            #x_test.append(data)
-            line = f.readline()
-    with open(train_label, 'r') as f:
-        line = f.readline()
-        while line:
-            lst = line.split()
-            data = [int(x) for x in lst]
-            y_train.append(data)
-            line = f.readline()
-    with open(test_label, 'r') as f:
-        line = f.readline()
-        while line:
-            lst = line.split()
-            data = [int(x) for x in lst]
-            y_test.append(data)
-            line = f.readline()
-
-    X_in = x_train_in + x_test_in
-    X_out = x_train_out + x_test_out
-    X_in = seq_padding(X_in)
-    X_out = seq_padding(X_out)
-    X_in = np.array(X_in)
-    X_out = np.array(X_out)
-    x_train_in = X_in[0:len(x_train_in)]
-    x_test_in = X_in[len(x_train_in):]
-    x_train_out = X_out[0:len(x_train_out)]
-    x_test_out = X_out[len(x_train_out):]
-
-    y_train = np.array(y_train)
-    y_test = np.array(y_test)
-    x_train_in = x_train_in.reshape(x_train_in.shape[0], x_train_in.shape[1],
-                                    1)
-    x_test_in = x_test_in.reshape(x_test_in.shape[0], x_test_in.shape[1], 1)
-    x_train_out = x_train_out.reshape(x_train_out.shape[0],
-                                      x_train_out.shape[1], 1)
-    x_test_out = x_test_out.reshape(x_test_out.shape[0], x_test_out.shape[1],
-                                    1)
-
-    y_train = y_train.reshape(y_train.shape[0], 1)
-    y_test = y_test.reshape(y_test.shape[0], 1)
-    #print(np.shape(x_train),np.shape(x_test))
-    return x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test
-
-
-def model_1(x_in, x_out, hidden_size):
-    with tf.variable_scope('LSTM_1'):
+def model_1(x_in, x_out, hidden_size, seq_len_in, seq_len_out):
+    with tf.variable_scope('LSTM_1', reuse=tf.AUTO_REUSE):
         cell_in_1 = tf.contrib.rnn.BasicLSTMCell(num_units=hidden_size)
         outputs_in, states_in = tf.nn.dynamic_rnn(
             cell=cell_in_1,
             inputs=x_in,
+            sequence_length=seq_len_in,
             time_major=False,
             dtype=tf.float32,
         )
@@ -126,6 +27,7 @@ def model_1(x_in, x_out, hidden_size):
         outputs_out, states_out = tf.nn.dynamic_rnn(
             cell=cell_out_1,
             inputs=x_out,
+            sequence_length=seq_len_out,
             time_major=False,
             dtype=tf.float32,
         )
@@ -133,20 +35,21 @@ def model_1(x_in, x_out, hidden_size):
 
 
 def model_2(outputs_in, outputs_out, hidden_size):
-    #params:
-    #output:(batch_size,seq_len,hidden_lstm)
-    #return:
-    #result:(batch_size,)
+    # params:
+    # output:(batch_size,seq_len,hidden_lstm)
+    # return:
+    # result:(batch_size,)
     with tf.name_scope('coAttention'):
         dense = tf.layers.Dense(hidden_size, activation='relu')
         x = dense(outputs_in)
-        #matrix:(batch_size,seq_in_len,seq_out_len)
+        # matrix:(batch_size,seq_in_len,seq_out_len)
+        # missing decode
         matrix = tf.matmul(x, tf.transpose(outputs_out, perm=[0, 2, 1]))
         input_weight = tf.nn.softmax(matrix, dim=1)
         output_weight = tf.nn.softmax(matrix, dim=-1)
-        #(batch_size,seq_in_len,hidden_lstm)
+        # (batch_size,seq_in_len,hidden_lstm)
         coat_in = tf.matmul(input_weight, outputs_out)
-        #(batch_size,seq_out_len,hidden_lstm)
+        # (batch_size,seq_out_len,hidden_lstm)
         coat_out = tf.matmul(tf.transpose(output_weight, perm=[0, 2, 1]),
                              outputs_in)
         co_in_result = tf.concat((coat_in, outputs_in), -1)
@@ -175,15 +78,22 @@ def model_3(co_in_result, co_out_result, hidden_size):
 
 
 def main():
-    x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test = load_data(
-        'data/TrainSamples_10_26.txt', 'data/TestSamples_10_26.txt',
-        'data/TrainLabel_10_26.txt', 'data/TestLabel_10_26.txt')
+    x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test, seq_len_in, seq_len_out = loadData.load_array(
+        train_file='sort_data/TrainSamples.txt',
+        test_file='sort_data/TestSamples.txt',
+        train_label='sort_data/TrainLabel.txt',
+        test_label='sort_data/TestLabel.txt')
+    seq_train_in = seq_len_in[0:len(x_train_in)]
+    seq_test_in = seq_len_in[len(x_train_in):]
+    seq_train_out = seq_len_out[0:len(x_train_out)]
+    seq_test_out = seq_len_out[len(x_train_out):]
     batch_size = 64
-    seq_len_in = x_train_in.shape[1]
-    seq_len_out = x_train_out.shape[1]
+    embed_len_in = x_train_in.shape[1]
+    embed_len_out = x_train_out.shape[1]
     embed_size = 1
-    learning_rate = 0.0001
+    learning_rate = 0.0005
     hidden_size = 64
+    epoches = 20
     iterations = 3000
     n_classes = 2
     y_train = one_hot(y_train, n_classes)
@@ -196,21 +106,24 @@ def main():
     with sess1.as_default():
         with g1.as_default():
             x_in_place = tf.placeholder(tf.float32,
-                                        [None, embed_size * seq_len_in])
-            x_in_place = tf.reshape(x_in_place, [-1, seq_len_in, embed_size])
+                                        [None, embed_size * embed_len_in])
+            x_in_place = tf.reshape(x_in_place, [-1, embed_len_in, embed_size])
             x_out_place = tf.placeholder(tf.float32,
-                                         [None, embed_size * seq_len_out])
+                                         [None, embed_size * embed_len_out])
             x_out_place = tf.reshape(x_out_place,
-                                     [-1, seq_len_out, embed_size])
+                                     [-1, embed_len_out, embed_size])
+            mask_in_place = tf.placeholder(tf.int32, shape=None)
+            mask_out_place = tf.placeholder(tf.int32, shape=None)
             y_place = tf.placeholder(tf.int32, [None, n_classes])
-            #mask_place = tf.placeholder(tf.float32,[None,embed_size])
+            # mask_place = tf.placeholder(tf.float32,[None,embed_size])
             output_in, output_out = model_1(x_in_place, x_out_place,
-                                            hidden_size)
+                                            hidden_size, mask_in_place,
+                                            mask_out_place)
             co_in_result, co_out_result = model_2(output_in, output_out,
                                                   hidden_size)
             outputs_final_in, outputs_final_out = model_3(
                 co_in_result, co_out_result, hidden_size)
-            #output_final = tf.concat([outputs_final_in, outputs_final_out], -1)
+            # output_final = tf.concat([outputs_final_in, outputs_final_out], -1)
             output_final = outputs_final_out
             output = tf.layers.dense(inputs=output_final[:, -1, :],
                                      units=n_classes)
@@ -255,41 +168,51 @@ def main():
                             tf.equal(actual, ones_like_actual),
                             tf.equal(prediction, zeros_like_prediction)),
                         'float'))
-
             init = tf.global_variables_initializer()
         sess1.run(init)
     index = 0
-    X_test_in = x_test_in[0:20000, :, :]
-    X_test_out = x_test_out[0:20000:, :, :]
-    Y_test = y_test[0:20000, :]
-    for step in range(iterations):
-        X_train_in = x_train_in[index:index + batch_size, :, :]
-        X_train_out = x_train_out[index:index + batch_size, :, :]
-        Y_train = y_train[index:index + batch_size, :]
-        index += batch_size
-        loss_, output_, op_ = sess1.run([cross_entropy, output, optimizer],
-                                        feed_dict={
-                                            x_in_place: X_train_in,
-                                            x_out_place: X_train_out,
-                                            y_place: Y_train
-                                        })
-        if step % 100 == 0:
-            accu_test, tp, fp, tn, fn, o_in, o_out = sess1.run(
-                [accuracy, tp_op, fp_op, tn_op, fn_op, outputs_final_in,
-                    outputs_final_out],
+    X_test_in = x_test_in
+    X_test_out = x_test_out
+    Y_test = y_test
+    for epoch in range(epoches):
+        index = 0
+        for step in range(iterations):
+            X_train_in = x_train_in[index:index + batch_size, :, :]
+            X_train_out = x_train_out[index:index + batch_size, :, :]
+            Y_train = y_train[index:index + batch_size, :]
+            len_in = seq_train_in[index:index + batch_size]
+            len_out = seq_train_out[index:index + batch_size]
+            index += batch_size
+            loss_, output_, op_ = sess1.run(
+                [cross_entropy, output, optimizer],
                 feed_dict={
-                    x_in_place: X_test_in,
-                    x_out_place: X_test_out,
-                    y_place: Y_test
+                    x_in_place: X_train_in,
+                    x_out_place: X_train_out,
+                    y_place: Y_train,
+                    mask_in_place: len_in,
+                    mask_out_place: len_out
                 })
-            tpr = float(tp) / (float(tp) + float(fn))
-            fpr = float(fp) / (float(fp) + float(tn))
-            fnr = float(fn) / (float(tp) + float(fn))
-            recall = float(tn) / (float(fp) + float(tn))
-            precision = float(tn) / (float(tn) + float(fn))
-            #print(tp,fp,tn,fn)
-            print(step, accu_test, recall, precision, loss_)
-    return 1
+            if step % 100 == 0:
+                accu_test, tp, fp, tn, fn, loss_test = sess1.run(
+                    [accuracy, tp_op, fp_op, tn_op, fn_op, cross_entropy],
+                    feed_dict={
+                        x_in_place: X_test_in,
+                        x_out_place: X_test_out,
+                        y_place: Y_test,
+                        mask_in_place: seq_test_in,
+                        mask_out_place: seq_test_out
+                    })
+                print(tp, fp, tn, fn)
+                if tn == 0:
+                    recall, precision = 0, 0
+                else:
+                    recall = float(tn) / (float(fp) + float(tn))
+                    precision = float(tn) / (float(tn) + float(fn))
+                # print(tp,fp,tn,fn)
+                print(epoch, step, accu_test, recall, precision, loss_,
+                      loss_test)
+
+    return 0
 
 
 if __name__ == '__main__':
