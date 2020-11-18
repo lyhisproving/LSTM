@@ -78,11 +78,12 @@ def model_3(co_in_result, co_out_result, hidden_size):
 
 
 def main():
-    x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test, seq_len_in, seq_len_out = loadData.load_array(
-        train_file='sort_data/TrainSamples.txt',
-        test_file='sort_data/TestSamples.txt',
-        train_label='sort_data/TrainLabel.txt',
-        test_label='sort_data/TestLabel.txt')
+    x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test, seq_len_in, seq_len_out = loadData.load_sequence(
+        train_file='sequence_data/TrainSamples.txt',
+        test_file='sequence_data/TestSamples.txt',
+        train_label='sequence_data/TrainLabel.txt',
+        test_label='sequence_data/TestLabel.txt')
+
     seq_train_in = seq_len_in[0:len(x_train_in)]
     seq_test_in = seq_len_in[len(x_train_in):]
     seq_train_out = seq_len_out[0:len(x_train_out)]
@@ -90,10 +91,10 @@ def main():
     batch_size = 64
     embed_len_in = x_train_in.shape[1]
     embed_len_out = x_train_out.shape[1]
-    embed_size = 1
-    learning_rate = 0.0005
-    hidden_size = 64
-    epoches = 20
+    embed_size = 10
+    learning_rate = 0.0001
+    hidden_size = 16
+    epoches = 30
     iterations = 3000
     n_classes = 2
     y_train = one_hot(y_train, n_classes)
@@ -208,7 +209,7 @@ def main():
                 else:
                     recall = float(tn) / (float(fp) + float(tn))
                     precision = float(tn) / (float(tn) + float(fn))
-                # print(tp,fp,tn,fn)
+                # print(tp,fp,tn,fn)gt
                 print(epoch, step, accu_test, recall, precision, loss_,
                       loss_test)
 

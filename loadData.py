@@ -18,6 +18,25 @@ def padding_array(X, max_len, padding=0):
     ])
 
 
+def embeding(data, embed_size):
+    result = []
+    for X in data:
+        tmp = np.array([
+            np.concatenate([x, [0] * (embed_size - len(x))])
+            if len(x) < embed_size else x for x in X
+        ])
+        result.append(tmp)
+    return result
+
+
+def padding_sequence(X, max_len, embed_size, padding=0):
+    return np.array([
+        np.concatenate([x, [[padding] * embed_size] *
+                        (max_len - len(x))]) if len(x) < max_len else x
+        for x in X
+    ])
+
+
 def load_array(train_file, test_file, train_label, test_label):
     # params: train_file,test_file
     # return X，Y的ndarray数组
@@ -36,6 +55,7 @@ def load_array(train_file, test_file, train_label, test_label):
     y_test = []
     max_num = -1e5
     min_num = 1e5
+    embed_size = 1
     with open(train_file, 'r') as f:
         line = f.readline()
         while line:
@@ -104,41 +124,20 @@ def load_array(train_file, test_file, train_label, test_label):
     y_test = np.array(y_test)
 
     seq_len_in = np.array(seq_len_in)
-
     seq_len_out = np.array(seq_len_out)
     x_train_in = x_train_in.reshape(x_train_in.shape[0], x_train_in.shape[1],
-                                    x_train_in.shape[2])
+                                    embed_size)
     x_test_in = x_test_in.reshape(x_test_in.shape[0], x_test_in.shape[1],
-                                  x_train_out.shape[2])
+                                  embed_size)
     x_train_out = x_train_out.reshape(x_train_out.shape[0],
-                                      x_train_out.shape[1],
-                                      x_train_out.shape[2])
+                                      x_train_out.shape[1], embed_size)
     x_test_out = x_test_out.reshape(x_test_out.shape[0], x_test_out.shape[1],
-                                    x_test_out.shape[2])
+                                    embed_size)
     y_train = y_train.reshape(y_train.shape[0], 1)
     y_test = y_test.reshape(y_test.shape[0], 1)
 
     # print(np.shape(x_train),np.shape(x_test))
     return x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test, seq_len_in, seq_len_out
-
-
-def embeding(data, embed_size):
-    result = []
-    for X in data:
-        tmp = np.array([
-            np.concatenate([x, [0] * (embed_size - len(x))])
-            if len(x) < embed_size else x for x in X
-        ])
-        result.append(tmp)
-    return result
-
-
-def padding_sequence(X, max_len, embed_size, padding=0):
-    return np.array([
-        np.concatenate([x, [[padding] * embed_size] *
-                        (max_len - len(x))]) if len(x) < max_len else x
-        for x in X
-    ])
 
 
 def load_sequence(train_file, test_file, train_label, test_label):
@@ -177,6 +176,7 @@ def load_sequence(train_file, test_file, train_label, test_label):
                 sentence_out.append(arr_out)
             x_train_in.append(sentence_in)
             x_train_out.append(sentence_out)
+            
             line = f.readline()
     with open(test_file, 'r') as f:
         line = f.readline()
@@ -220,6 +220,7 @@ def load_sequence(train_file, test_file, train_label, test_label):
             y_test.append(data)
             line = f.readline()
     # padding
+    #print(np.shape(x_train_in),np.shape(x_train_out))
     X_in = x_train_in + x_test_in
     X_out = x_train_out + x_test_out
     L1 = (len(x) for x in X_in)
@@ -229,6 +230,7 @@ def load_sequence(train_file, test_file, train_label, test_label):
     X_in = padding_sequence(X_in, max_len_in, embed_size=embed_size)
     X_out = padding_sequence(X_out, max_len_out, embed_size=embed_size)
     # mask
+    
     seq_len_in = [len(x) for x in X_in]
     seq_len_out = [len(x) for x in X_out]
 
@@ -242,18 +244,15 @@ def load_sequence(train_file, test_file, train_label, test_label):
     y_test = np.array(y_test)
 
     seq_len_in = np.array(seq_len_in)
-
     seq_len_out = np.array(seq_len_out)
     x_train_in = x_train_in.reshape(x_train_in.shape[0], x_train_in.shape[1],
-                                    x_train_in.shape[2])
-    x_test_in = x_test_in.reshape(x_test_in.shape[0], x_test_in.shape[1],
-                                  x_train_in.shape[2])
+                                    -1)
+    x_test_in = x_test_in.reshape(x_test_in.shape[0], x_test_in.shape[1], -1)
     x_train_out = x_train_out.reshape(x_train_out.shape[0],
-                                      x_train_out.shape[1],
-                                      x_train_out.shape[2])
+                                      x_train_out.shape[1], -1)
     x_test_out = x_test_out.reshape(x_test_out.shape[0], x_test_out.shape[1],
-                                    x_test_out.shape[2])
+                                    -1)
     y_train = y_train.reshape(y_train.shape[0], 1)
     y_test = y_test.reshape(y_test.shape[0], 1)
 
-    return x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test
+    return x_train_in, x_train_out, x_test_in, x_test_out, y_train, y_test, seq_len_in, seq_len_out
